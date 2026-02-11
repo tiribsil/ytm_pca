@@ -18,6 +18,9 @@ python yt_audio_pca.py "YOUR_YOUTUBE_URL_OR_PLAYLIST"
 
 # If you get "Sign in to confirm you're not a bot" error:
 python yt_audio_pca.py "YOUR_URL" --cookies cookies.txt
+
+# If you already have all songs and want to skip YouTube entirely:
+python yt_audio_pca.py --local
 ```
 
 ## How to get cookies.txt

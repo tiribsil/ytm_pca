@@ -19,8 +19,9 @@ TARGET_SR = 24000
 
 def get_args():
     parser = argparse.ArgumentParser(description="Generate Audio Embeddings from YouTube songs and plot them.")
-    parser.add_argument("urls", nargs="+", help="List of YouTube Video or Playlist URLs")
+    parser.add_argument("urls", nargs="*", help="List of YouTube Video or Playlist URLs")
     parser.add_argument("--cookies", help="Path to cookies.txt file for authentication")
+    parser.add_argument("--local", action="store_true", help="Skip YouTube entirely and process all files in the audio/ directory")
     return parser.parse_args()
 
 def download_audio(url, output_dir, cookiefile=None):
@@ -49,8 +50,11 @@ def download_audio(url, output_dir, cookiefile=None):
 
     # Options for metadata extraction (ignore archive so we get all entries)
     ydl_opts_meta = ydl_opts.copy()
+    ydl_opts_meta['format'] = None  # Just get basic info, don't check formats
     if 'download_archive' in ydl_opts_meta:
         del ydl_opts_meta['download_archive']
+    if 'postprocessors' in ydl_opts_meta:
+        del ydl_opts_meta['postprocessors']
     
     # 1. Extract metadata WITHOUT downloading to get filenames
     print("Fetching metadata...")
@@ -248,12 +252,23 @@ def main():
     print(f"Loaded {len(embedding_cache)} embeddings from cache.")
 
     # 2. Download/Collect Audio Files
-    print("Checking and downloading songs...")
     files_to_process = []
     
-    for url in args.urls:
-        files = download_audio(url, audio_dir, cookiefile=args.cookies)
-        files_to_process.extend(files)
+    if args.local:
+        print("Local mode: Scanning audio/ directory...")
+        for file in os.listdir(audio_dir):
+            if file.endswith(".wav"):
+                filepath = os.path.join(audio_dir, file)
+                title = os.path.splitext(file)[0]
+                files_to_process.append((filepath, title))
+    else:
+        if not args.urls:
+            print("Error: Provide at least one URL or use --local.")
+            sys.exit(1)
+        print("Checking and downloading songs from YouTube...")
+        for url in args.urls:
+            files = download_audio(url, audio_dir, cookiefile=args.cookies)
+            files_to_process.extend(files)
     
     valid_files = [f for f in files_to_process if os.path.exists(f[0])]
     print(f"Found {len(valid_files)} valid audio files to process.")
