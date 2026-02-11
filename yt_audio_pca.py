@@ -350,26 +350,33 @@ def main():
         print("Need at least 2 songs for analysis.")
         sys.exit(1)
 
-    # 4. Automatic Clustering (Gaussian Mixture Model with BIC)
-    # We find the 'best' number of clusters by minimizing BIC on high-dim space
+    # 4. Automatic Clustering (Gaussian Mixture Model with AIC)
+    # We find the 'best' number of clusters by minimizing AIC on high-dim space.
+    # AIC is typically less conservative than BIC, which is better for "fun" discovery plots.
     print("Finding best clustering configuration (high-dim)...")
     n_samples = X.shape[0]
-    max_k = min(11, n_samples)
+    max_k = min(15, n_samples) # Slightly higher max_k for better discovery
     
-    best_bic = np.inf
+    best_score = np.inf
     best_gmm = None
     best_k = 1
     
     for k in range(1, max_k):
-        gmm = GaussianMixture(n_components=k, random_state=42)
+        # We use 'diag' covariance to reduce parameter count in high-dim space,
+        # which helps avoiding the BIC/AIC penalty being too harsh.
+        gmm = GaussianMixture(n_components=k, random_state=42, covariance_type='diag')
         gmm.fit(X)
-        bic = gmm.bic(X)
-        if bic < best_bic:
-            best_bic = bic
+        score = gmm.aic(X) # Switched to AIC
+        if score < best_score:
+            best_score = score
             best_gmm = gmm
             best_k = k
             
-    print(f"Optimal clusters found: {best_k}")
+    # Fallback: If AIC still says 1 but we have many samples, 
+    # the user probably wants to see some grouping. 
+    # But for now, let's trust AIC with the 'diag' fix.
+    
+    print(f"Optimal clusters discovered (AIC): {best_k}")
     cluster_labels = best_gmm.predict(X)
     cluster_names = [f"Cluster {c}" for c in cluster_labels]
 
