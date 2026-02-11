@@ -20,9 +20,10 @@ TARGET_SR = 24000
 def get_args():
     parser = argparse.ArgumentParser(description="Generate Audio Embeddings from YouTube songs and plot them.")
     parser.add_argument("urls", nargs="+", help="List of YouTube Video or Playlist URLs")
+    parser.add_argument("--cookies", help="Path to cookies.txt file for authentication")
     return parser.parse_args()
 
-def download_audio(url, output_dir):
+def download_audio(url, output_dir, cookiefile=None):
     """
     Downloads audio from YouTube URL into the output directory.
     Skips if file already exists in download archive.
@@ -40,6 +41,9 @@ def download_audio(url, output_dir):
         'no_warnings': True,
         'download_archive': os.path.join(output_dir, 'downloaded.txt'),
     }
+    
+    if cookiefile:
+        ydl_opts['cookiefile'] = cookiefile
 
     downloaded_files = []
 
@@ -248,7 +252,7 @@ def main():
     files_to_process = []
     
     for url in args.urls:
-        files = download_audio(url, audio_dir)
+        files = download_audio(url, audio_dir, cookiefile=args.cookies)
         files_to_process.extend(files)
     
     valid_files = [f for f in files_to_process if os.path.exists(f[0])]

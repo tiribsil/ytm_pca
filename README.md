@@ -15,7 +15,13 @@ pip install -r requirements.txt
 
 # Run the script
 python yt_audio_pca.py "YOUR_YOUTUBE_URL_OR_PLAYLIST"
+
+# If you get "Sign in to confirm you're not a bot" error:
+python yt_audio_pca.py "YOUR_URL" --cookies cookies.txt
 ```
+
+## How to get cookies.txt
+Install a browser extension like "Get cookies.txt LOCALLY" (Chrome) or "cookies.txt" (Firefox), export your YouTube cookies as a `.txt` file, and save it in the project directory as `cookies.txt`.
 
 ## Viewing the Plot
 
