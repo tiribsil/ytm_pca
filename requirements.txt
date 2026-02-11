@@ -7,3 +7,5 @@ yt-dlp
 tqdm
 plotly
 pandas
+static-ffmpeg
+psutil

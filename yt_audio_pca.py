@@ -1,21 +1,21 @@
 import argparse
 import os
 import sys
-import tempfile
 import numpy as np
 import torch
-import torchaudio
 from transformers import Wav2Vec2Model
 from sklearn.decomposition import PCA
-import matplotlib.pyplot as plt
 import yt_dlp
 from tqdm import tqdm
 import librosa
+import static_ffmpeg
+import psutil
+static_ffmpeg.add_paths()
 
 # Constants
 MODEL_NAME = "m-a-p/MERT-v1-95M"
 TARGET_SR = 24000
-MAX_DURATION_SEC = 60  # Analyze up to 60 seconds to save time/memory
+# MAX_DURATION_SEC removed to analyze full song
 
 def get_args():
     parser = argparse.ArgumentParser(description="Generate Audio Embeddings from YouTube songs and plot them.")
@@ -106,17 +106,10 @@ def load_and_preprocess_audio(filepath):
         # mono=True mixes to mono
         waveform, _ = librosa.load(filepath, sr=TARGET_SR, mono=True)
         
+        original_duration = len(waveform) / TARGET_SR
+        
         # Convert to tensor [1, time]
         waveform = torch.tensor(waveform).unsqueeze(0)
-        
-        # Truncate/Crop
-        num_frames = waveform.shape[1]
-        max_frames = TARGET_SR * MAX_DURATION_SEC
-        
-        if num_frames > max_frames:
-            # Take middle segment
-            start = (num_frames - max_frames) // 2
-            waveform = waveform[:, start:start+max_frames]
             
         return waveform, original_duration
     except Exception as e:
@@ -126,25 +119,72 @@ def load_and_preprocess_audio(filepath):
 
 def generate_embedding(model, waveform):
     """
-    Generates embedding using MERT model.
+    Generates embedding using MERT model. 
+    Dynamically chooses between full-song and chunked processing based on available RAM.
     """
+    total_samples = waveform.shape[1]
+    
+    # Heuristic: Wav2Vec2 attention is roughly O(L^2).
+    # Sequences longer than ~3-5 mins at 24kHz can be heavy.
+    # We estimate based on available memory.
+    
+    available_gb = psutil.virtual_memory().available / (1024 ** 3)
+    
+    # 24kHz audio -> Downsampled ~320x -> ~75 frames per second
+    # L = duration_sec * 75
+    # Memory ~ L^2 * intermediate_layers * heads * size
+    # Let's use a conservative threshold for "too long for one go"
+    # Even with 256GB, very long songs (e.g. 1 hour) are impossible $O(L^2)$
+    
+    chunk_size_sec = 10
+    max_full_song_sec = 300 # 5 mins default safe limit even for high RAM
+    
+    # Increase limit if we have massive RAM (256GB user request)
+    if available_gb > 200:
+        max_full_song_sec = 1800 # 30 mins
+    elif available_gb > 64:
+        max_full_song_sec = 600 # 10 mins
+        
+    duration_sec = total_samples / TARGET_SR
+    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+
+    if duration_sec <= max_full_song_sec:
+        # Process the whole song at once
+        try:
+            with torch.no_grad():
+                input_values = waveform.to(device)
+                outputs = model(input_values, output_hidden_states=True)
+                last_hidden_state = outputs.last_hidden_state
+                embedding = torch.mean(last_hidden_state, dim=1).cpu().numpy().flatten()
+                return embedding
+        except RuntimeError as e:
+            if "out of memory" in str(e).lower():
+                print("GPU/CPU OOM detected for full song. Falling back to chunking...")
+                # Fallthrough to chunking logic
+            else:
+                raise e
+
+    # Chunking Strategy
+    print(f"Analyzing in {chunk_size_sec}s chunks (Total: {duration_sec:.1f}s)...")
+    chunk_size = chunk_size_sec * TARGET_SR
+    all_chunk_embeddings = []
+    
     with torch.no_grad():
-        if torch.cuda.is_available():
-            input_values = waveform.cuda()
-        else:
-            input_values = waveform
+        for i in range(0, total_samples, chunk_size):
+            chunk = waveform[:, i:i+chunk_size].to(device)
+            if chunk.shape[1] < TARGET_SR: continue # Skip fragments < 1s
+                
+            outputs = model(chunk, output_hidden_states=True)
+            last_hidden_state = outputs.last_hidden_state
+            chunk_embedding = torch.mean(last_hidden_state, dim=1).cpu()
+            all_chunk_embeddings.append(chunk_embedding)
             
-        outputs = model(input_values, output_hidden_states=True)
+        if not all_chunk_embeddings: return None
+        mean_embedding = torch.mean(torch.stack(all_chunk_embeddings), dim=0)
         
-        # MERT-v1-95M has 13 layers (0-12). 
-        # Layer 12 (final) is good for audio features.
-        
-        last_hidden_state = outputs.last_hidden_state # [batch, time, 768]
-        
-        # Average over time dimension to get a single vector per song
-        embedding = torch.mean(last_hidden_state, dim=1) # [batch, 768]
-        
-    return embedding.cpu().numpy().flatten()
+    return mean_embedding.numpy().flatten()
 
 import csv
 import pandas as pd
