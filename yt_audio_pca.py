@@ -5,6 +5,7 @@ import numpy as np
 import torch
 from transformers import Wav2Vec2Model
 from sklearn.decomposition import PCA
+from sklearn.mixture import GaussianMixture
 import yt_dlp
 from tqdm import tqdm
 import librosa
@@ -343,17 +344,37 @@ def main():
     else:
         print("All songs found in cache. Skipping model loading.")
 
-    if not all_embeddings:
-        print("No embeddings generated.")
-        sys.exit(1)
-
-    # PCA
+    # Prepare embeddings for analysis
     X = np.array(all_embeddings)
     if len(X) < 2:
-        print("Need at least 2 songs for PCA.")
+        print("Need at least 2 songs for analysis.")
         sys.exit(1)
-        
-    print("Performing PCA...")
+
+    # 4. Automatic Clustering (Gaussian Mixture Model with BIC)
+    # We find the 'best' number of clusters by minimizing BIC on high-dim space
+    print("Finding best clustering configuration (high-dim)...")
+    n_samples = X.shape[0]
+    max_k = min(11, n_samples)
+    
+    best_bic = np.inf
+    best_gmm = None
+    best_k = 1
+    
+    for k in range(1, max_k):
+        gmm = GaussianMixture(n_components=k, random_state=42)
+        gmm.fit(X)
+        bic = gmm.bic(X)
+        if bic < best_bic:
+            best_bic = bic
+            best_gmm = gmm
+            best_k = k
+            
+    print(f"Optimal clusters found: {best_k}")
+    cluster_labels = best_gmm.predict(X)
+    cluster_names = [f"Cluster {c}" for c in cluster_labels]
+
+    # 5. Dimensionality Reduction (PCA)
+    print("Performing PCA reduction to 2D...")
     pca = PCA(n_components=2)
     X_r = pca.fit_transform(X)
 
@@ -377,14 +398,16 @@ def main():
         'y': X_r[:, 1],
         'title': all_titles,
         'filepath': relative_paths,
-        'duration': all_durations
+        'duration': all_durations,
+        'cluster': cluster_names
     })
     
     print("Generating Interactive Plot...")
     
     fig = px.scatter(df, x='x', y='y', hover_name='title', 
+                     color='cluster',
                      custom_data=['filepath', 'duration'],
-                     title='Song Embeddings PCA (Audio on Hover)',
+                     title=f'Song Embeddings PCA (Audio on Hover) - {best_k} Clusters Found',
                      template='plotly_dark')
     
     fig.update_traces(marker=dict(size=8, opacity=0.7))
