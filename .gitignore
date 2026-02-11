@@ -1,0 +1,20 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.venv/
+venv/
+ENV/
+env/
+
+# Project-specific
+audio/
+embeddings_cache.csv
+song_embeddings_pca.png
+song_embeddings_pca.html
+
+# IDEs
+.vscode/
+.idea/
